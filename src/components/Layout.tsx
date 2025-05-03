@@ -22,12 +22,13 @@ export default function Layout({ children }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  content: {
-    flex: 1,
-    padding: SIZES.padding,
-  },
-});
+    container: {
+      flex: 1,
+      backgroundColor: COLORS.background,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: SIZES.padding,
+      paddingTop: 0, // üst boşluk verme, zaten insets.top veriliyor
+    },
+  });

@@ -1,57 +1,92 @@
-import React from 'react';
-import { FlatList, Image, StyleSheet, View } from 'react-native';
-import Layout from '../components/Layout';
-
-const sampleData = [
-    { id: '8', image: require('../assets/Dergi-Sayi-8.png') },
-    { id: '7', image: require('../assets/Dergi-Sayi-7.png') },
-    { id: '6', image: require('../assets/Dergi-Sayi-6.png') },
-    { id: '5', image: require('../assets/Dergi-Sayi-5.png') },
-    { id: '4', image: require('../assets/Dergi-Sayi-4.webp') },
-    { id: '3', image: require('../assets/Dergi-Sayi-3.png') },
-    { id: '2', image: require('../assets/Dergi-Sayi-2.png') },
-    { id: '1', image: require('../assets/Dergi-Sayi-1.png') },
-];
+import React, { useEffect, useState, useRef } from 'react';
+import { StyleSheet, Dimensions, View, ActivityIndicator } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { useRoute, useFocusEffect } from '@react-navigation/native';
 
 export default function HomeScreen() {
-  const renderItem = ({ item }: { item: { id: string, image: any } }) => (
-    <View style={styles.card}>
-      <Image source={item.image} style={styles.image} />
-    </View>
+  const route = useRoute();
+  const webViewRef = useRef(null);
+  const [key, setKey] = useState(0); // WebView'i yenilemek için key kullanacağız
+  const [loading, setLoading] = useState(true);
+  const [currentUri, setCurrentUri] = useState('');
+  
+  const defaultPdfUrl = 'https://kotgep.com/dergi/Dergi-Sayi-8.pdf';
+  
+  // Sayfa odaklandığında her zaman çalışacak
+  useFocusEffect(
+    React.useCallback(() => {
+      const params = route.params as { uri?: string } | undefined;
+      const newUri = params?.uri || defaultPdfUrl;
+      
+      // URI değiştiyse veya sayfaya yeni geldiyse WebView'i yenile
+      if (newUri !== currentUri || currentUri === '') {
+        setCurrentUri(newUri);
+        setKey(prevKey => prevKey + 1); // WebView'i yenilemek için key değiştir
+        setLoading(true);
+      }
+      
+      return () => {
+        // Cleanup fonksiyonu (gerekirse)
+      };
+    }, [route.params])
   );
-
+  
+  // WebView'in yükleme durumunu takip et
+  const handleLoadStart = () => {
+    setLoading(true);
+  };
+  
+  const handleLoadEnd = () => {
+    setLoading(false);
+  };
+  
   return (
-    <Layout>
-      <FlatList
-        data={sampleData}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
-        contentContainerStyle={styles.list}
+    <View style={styles.container}>
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#0000ff" />
+        </View>
+      )}
+      
+      <WebView
+        key={key} // Key değiştiğinde WebView yeniden oluşturulur
+        ref={webViewRef}
+        source={{ uri: currentUri }}
+        style={styles.webview}
+        startInLoadingState={true}
+        onLoadStart={handleLoadStart}
+        onLoadEnd={handleLoadEnd}
+        // PDF'leri daha iyi görüntülemek için ayarlar
+        originWhitelist={['*']}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        allowFileAccess={true}
+        allowUniversalAccessFromFileURLs={true}
+        mixedContentMode="always"
+        cacheEnabled={false} // Önbellek sorunlarını önlemek için
       />
-    </Layout>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  list: {
-    padding: 10,
-  },
-  card: {
+  container: {
     flex: 1,
-    margin: 8,
-    borderRadius: 5,
-    overflow: 'hidden',
     backgroundColor: '#fff',
-    elevation: 2, // Android gölge
-    shadowColor: '#000', // iOS gölge
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
-  image: {
-    width: '100%',
-    height: 250,
-    resizeMode: 'cover',
+  webview: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
   },
+  loadingContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  }
 });
