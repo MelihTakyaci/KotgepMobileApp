@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import LibraryScreen from '../screens/LibraryScreen';
 import HomeScreen from '../screens/HomeScreen';
 import EventScreen from '../screens/EventScreen';
+import ReadEventScreen from '../screens/ReadEventScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -48,10 +49,10 @@ function HaberlerStack() {
       }}
     >
       <Stack.Screen name="HaberlerAna" component={EventScreen} />
+      <Stack.Screen name="HaberOku" component={ReadEventScreen} />
     </Stack.Navigator>
   );
 }
-
 export default function AppNavigator() {
   return (
     <NavigationContainer>

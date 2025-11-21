@@ -14,13 +14,6 @@ export default function Navbar() {
         />
         <Text style={styles.title}>KOTGEP</Text>
       </View>
-
-      {/* Sağ taraf: Arama Kutusu */}
-      <TextInput
-        style={styles.searchInput}
-        placeholder="Ara..."
-        placeholderTextColor="#999"
-      />
     </View>
   );
 }

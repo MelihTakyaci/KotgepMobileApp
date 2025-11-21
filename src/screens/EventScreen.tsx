@@ -1,18 +1,38 @@
-import React, { useState } from 'react';
-import { FlatList, Image, StyleSheet, View, TouchableOpacity, Text, Modal } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { FlatList, Image, StyleSheet, View, TouchableOpacity, Text, Modal, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { supabase } from '../services/supabase';
 import Layout from '../components/Layout';
-
-const eventData = [
-  { id: '1', title: 'Yazar Buluşması - Nisan', image: require('../assets/adaptive-icon.png'), content: 'https://kotgep.com/haber/1' },
-  { id: '2', title: 'Çocuk Atölyesi', image: require('../assets/adaptive-icon.png'), content: 'https://kotgep.com/haber/2' },
-
-];
+import WeatherHeader from '../components/WeatherHeader';
 
 export default function EventScreen() {
   const navigation = useNavigation();
+  const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+  const fetchEvents = async () => {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .order('id', { ascending: false });
+
+    console.log("Fetched events:", data);
+    console.log("Fetch error:", error);
+
+    if (error) {
+      console.error('Error fetching events:', error.message);
+    } else {
+      setEvents(data);
+    }
+
+    setLoading(false);
+  };
+
+  fetchEvents();
+}, []);
 
   const handleEventTap = (event) => {
     setSelectedEvent(event);
@@ -20,28 +40,37 @@ export default function EventScreen() {
   };
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.card}
-      onPress={() => handleEventTap(item)}
-    >
-      <Image source={item.image} style={styles.image} />
+    <TouchableOpacity style={styles.card} onPress={() => handleEventTap(item)}>
+      <Image
+        source={{ uri: item.cover_image }}
+        style={styles.image}
+        defaultSource={require('../assets/placeholder.png')}
+      />
       <View style={styles.titleOverlay}>
         <Text style={styles.title}>{item.title}</Text>
       </View>
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <Layout>
+        <ActivityIndicator size="large" color="#2196F3" />
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
+      <WeatherHeader city="Prizren" />
       <FlatList
-        data={eventData}
+        data={events}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id.toString()}
         numColumns={2}
         contentContainerStyle={styles.list}
       />
 
-      {/* Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -57,7 +86,7 @@ export default function EventScreen() {
                   style={styles.modalButton}
                   onPress={() => {
                     setModalVisible(false);
-                    navigation.navigate('HaberOku', { url: selectedEvent.content });
+                    navigation.navigate('HaberOku', { eventId: selectedEvent.id });
                   }}
                 >
                   <Text style={styles.buttonText}>Haberi Oku</Text>
