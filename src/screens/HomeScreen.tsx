@@ -7,7 +7,7 @@ import { WebView } from 'react-native-webview';
 import type { WebViewMessageEvent } from 'react-native-webview';
 import {
   downloadPdf as downloadForOffline,
-  getLocalPdfPath,
+  findExistingPdfUri,
   resolveFilename,
 } from '../hooks/useDownloadedMagazines';
 
@@ -340,11 +340,10 @@ export default function HomeScreen() {
 
             if (storageKey) {
               try {
-                const existing = getLocalPdfPath(storageKey);
-                const info = await FileSystem.getInfoAsync(existing);
-                if (!cancelled && info.exists) {
+                const existing = await findExistingPdfUri(storageKey);
+                if (!cancelled && existing) {
                   await cleanupTempFile();
-                  setLocalFileUri(existing);
+                  setLocalFileUri(existing.uri);
                   return;
                 }
               } catch (checkError) {
@@ -379,10 +378,9 @@ export default function HomeScreen() {
 
           // storageKey üzerinden indirilen kopyayı kontrol et
           try {
-            const storedPath = getLocalPdfPath(effectiveStorageKey);
-            const info = await FileSystem.getInfoAsync(storedPath);
-            if (!cancelled && info.exists) {
-              setLocalFileUri(storedPath);
+            const existing = await findExistingPdfUri(effectiveStorageKey);
+            if (!cancelled && existing) {
+              setLocalFileUri(existing.uri);
               return;
             }
           } catch (lookupError) {

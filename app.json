@@ -28,6 +28,12 @@
     },
     "plugins": [
       "expo-build-properties"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ea4d3d2e-5f99-42fc-b429-93487f353cf2"
+      }
+    },
+    "owner": "mintks"
   }
 }

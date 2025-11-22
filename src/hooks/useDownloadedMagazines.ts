@@ -2,18 +2,49 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const ensureTrailingSlash = (value: string) => (value.endsWith('/') ? value : `${value}/`);
 
-const getStorageRoot = () => {
-  const base = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
-  if (!base) {
-    throw new Error('Dosya sistemi kullanıma hazır değil.');
-  }
-  return ensureTrailingSlash(base);
+export type DownloadedPdfInfo = {
+  uri: string;
+  size: number;
+  modificationTime: number | null;
 };
 
-const getPdfDirectory = () => `${getStorageRoot()}pdfs/`;
+const directoryCache: {
+  all?: string[];
+  primary?: string;
+} = {};
 
-const ensurePdfDirectory = async () => {
-  const dir = getPdfDirectory();
+const resolveStorageRoots = () => {
+  if (directoryCache.all) {
+    return directoryCache.all;
+  }
+
+  const rawRoots = [FileSystem.documentDirectory, FileSystem.cacheDirectory].filter(
+    (root): root is string => typeof root === 'string' && root.length > 0
+  );
+
+  if (rawRoots.length === 0) {
+    throw new Error('Dosya sistemi kullanıma hazır değil.');
+  }
+
+  const uniqueRoots = Array.from(new Set(rawRoots.map(ensureTrailingSlash)));
+  const directories = uniqueRoots.map((root) => `${root}pdfs/`);
+
+  directoryCache.all = directories;
+  directoryCache.primary = directories[0];
+  return directories;
+};
+
+const getPrimaryPdfDirectory = () => {
+  if (directoryCache.primary) {
+    return directoryCache.primary;
+  }
+  const directories = resolveStorageRoots();
+  directoryCache.primary = directories[0];
+  return directoryCache.primary;
+};
+
+const ensurePrimaryPdfDirectory = async () => {
+  const dir = getPrimaryPdfDirectory();
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   return dir;
 };
@@ -25,21 +56,66 @@ export const resolveFilename = (path: string) => {
   return last && last.length > 0 ? last : `magazine-${Date.now()}.pdf`;
 };
 
-export const getLocalPdfPath = (path: string) => `${getPdfDirectory()}${resolveFilename(path)}`;
+export const getLocalPdfPath = (path: string) => `${getPrimaryPdfDirectory()}${resolveFilename(path)}`;
+
+const toCandidatePaths = (fileName: string) => resolveStorageRoots().map((dir) => `${dir}${fileName}`);
+
+export const findExistingPdfUri = async (path: string): Promise<DownloadedPdfInfo | null> => {
+  const fileName = resolveFilename(path);
+  const candidates = toCandidatePaths(fileName);
+
+  for (const candidate of candidates) {
+    try {
+      const info = await FileSystem.getInfoAsync(candidate);
+      if (info.exists) {
+        return {
+          uri: candidate,
+          size: info.size ?? 0,
+          modificationTime: info.modificationTime ?? null,
+        };
+      }
+    } catch (error) {
+      console.warn('PDF konumu kontrolü başarısız:', error);
+    }
+  }
+
+  return null;
+};
 
 export const isPdfDownloaded = async (path: string) => {
-  try {
-    const fileUri = getLocalPdfPath(path);
-    const info = await FileSystem.getInfoAsync(fileUri);
-    return info.exists;
-  } catch (error) {
-    console.warn('PDF indirme durumu kontrolü başarısız:', error);
-    return false;
+  const info = await findExistingPdfUri(path);
+  return !!info && info.size > 0;
+};
+
+export const listDownloadedPdfs = async () => {
+  const directories = resolveStorageRoots();
+  const files = new Set<string>();
+
+  for (const dir of directories) {
+    try {
+      const entries = await FileSystem.readDirectoryAsync(dir);
+      entries.forEach((entry) => files.add(entry));
+    } catch (error: any) {
+      const message = typeof error?.message === 'string' ? error.message : '';
+      const code = error?.code ?? '';
+      if (
+        code === 'E_DIRECTORY_NOT_FOUND' ||
+        code === 'ERR_FILESYSTEM_DIR_NOT_EXIST' ||
+        message.includes('Directory does not exist') ||
+        message.includes('No such file') ||
+        message.includes('No such file or directory')
+      ) {
+        continue;
+      }
+      console.warn('PDF dizini okunamadı:', error);
+    }
   }
+
+  return Array.from(files);
 };
 
 export const downloadPdf = async (path: string, remoteUrl: string) => {
-  const dir = await ensurePdfDirectory();
+  const dir = await ensurePrimaryPdfDirectory();
   const finalPath = `${dir}${resolveFilename(path)}`;
   const tempPath = `${finalPath}.download`;
 
@@ -59,10 +135,14 @@ export const downloadPdf = async (path: string, remoteUrl: string) => {
 };
 
 export const deletePdf = async (path: string) => {
-  try {
-    const fileUri = getLocalPdfPath(path);
-    await FileSystem.deleteAsync(fileUri, { idempotent: true });
-  } catch (error) {
-    console.warn('PDF silinirken hata oluştu:', error);
+  const fileName = resolveFilename(path);
+  const candidates = toCandidatePaths(fileName);
+
+  for (const candidate of candidates) {
+    try {
+      await FileSystem.deleteAsync(candidate, { idempotent: true });
+    } catch (error) {
+      console.warn('PDF silinirken hata oluştu:', error);
+    }
   }
 };

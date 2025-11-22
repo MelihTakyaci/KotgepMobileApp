@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,9 @@ import {
 import { supabase } from '../services/supabase';
 import Layout from '../components/Layout';
 import {
-  isPdfDownloaded,
   downloadPdf,
   deletePdf,
+  findExistingPdfUri,
   getLocalPdfPath,
 } from '../hooks/useDownloadedMagazines';
 import { useNavigation } from '@react-navigation/native';
@@ -39,7 +39,37 @@ export default function LibraryScreen() {
   const [magazines, setMagazines] = useState<MagazineIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingIds, setDownloadingIds] = useState<number[]>([]);
+  const [downloadedUris, setDownloadedUris] = useState<Record<string, string>>({});
   const navigation = useNavigation<any>();
+
+  const refreshDownloadStatuses = useCallback(async (issues: MagazineIssue[]) => {
+    if (!issues.length) {
+      setDownloadedUris({});
+      return;
+    }
+
+    const checks = await Promise.all(
+      issues.map(async (issue) => {
+        try {
+          const hit = await findExistingPdfUri(issue.pdf_path);
+          return hit ? ([issue.pdf_path, hit.uri] as const) : null;
+        } catch (error) {
+          console.log('PDF konumu güncellenemedi:', error);
+          return null;
+        }
+      })
+    );
+
+    const next: Record<string, string> = {};
+    checks.forEach((entry) => {
+      if (entry) {
+        const [key, uri] = entry;
+        next[key] = uri;
+      }
+    });
+
+    setDownloadedUris(next);
+  }, []);
 
   useEffect(() => {
     const fetchMagazines = async () => {
@@ -51,17 +81,35 @@ export default function LibraryScreen() {
       if (error) {
         console.error('Dergi verisi çekilemedi:', error.message);
       } else {
-        setMagazines(data ?? []);
+        const list = data ?? [];
+        setMagazines(list);
+        try {
+          await refreshDownloadStatuses(list);
+        } catch (statusError) {
+          console.log('İndirilen dergiler güncellenemedi:', statusError);
+        }
       }
 
       setLoading(false);
     };
 
     fetchMagazines();
-  }, []);
+  }, [refreshDownloadStatuses]);
+
+  useEffect(() => {
+    if (!magazines.length) {
+      setDownloadedUris({});
+      return;
+    }
+
+    refreshDownloadStatuses(magazines).catch((statusError) =>
+      console.log('Dergi listesi değişti, durum yenilenemedi:', statusError)
+    );
+  }, [magazines, refreshDownloadStatuses]);
 
   const handleCardPress = async (item: MagazineIssue) => {
-    const isDownloaded = await isPdfDownloaded(item.pdf_path);
+    const existing = await findExistingPdfUri(item.pdf_path);
+    const isDownloaded = !!existing;
     const isDownloading = downloadingIds.includes(item.id);
     if (isDownloading) return;
 
@@ -79,7 +127,7 @@ export default function LibraryScreen() {
                   screen: 'AnaSayfaAna',
                   params: {
                     mode: 'offline',
-                    uri: getLocalPdfPath(item.pdf_path),
+                    uri: existing?.uri ?? getLocalPdfPath(item.pdf_path),
                     storageKey: item.pdf_path,
                   },
                 }),
@@ -97,6 +145,11 @@ export default function LibraryScreen() {
               text: 'Sil',
               onPress: async () => {
                 await deletePdf(item.pdf_path);
+                try {
+                  await refreshDownloadStatuses(magazines);
+                } catch (statusError) {
+                  console.log('Silme sonrası indirme durumu güncellenemedi:', statusError);
+                }
               },
             }
           : {
@@ -106,6 +159,7 @@ export default function LibraryScreen() {
                 try {
                   await downloadPdf(item.pdf_path, remoteUrl);
                   Alert.alert('İndirme tamamlandı', 'Dergi başarıyla indirildi.');
+                  await refreshDownloadStatuses(magazines);
                 } catch (err) {
                   console.error('İndirme başarısız:', err);
                   Alert.alert('Hata', 'PDF indirilirken bir sorun oluştu.');
@@ -122,12 +176,14 @@ export default function LibraryScreen() {
 
   const renderItem = ({ item }: { item: MagazineIssue }) => {
     const isDownloading = downloadingIds.includes(item.id);
+    const isDownloaded = Boolean(downloadedUris[item.pdf_path]);
 
     return (
       <TouchableOpacity
         style={[
           styles.magazineCard,
           isDownloading && styles.downloadingCard,
+          isDownloaded && styles.downloadedCard,
         ]}
         onPress={() => handleCardPress(item)}
         disabled={isDownloading}
@@ -142,6 +198,11 @@ export default function LibraryScreen() {
             ? 'İndiriliyor...'
             : `Sayı ${item.issue_number} - ${item.month}`}
         </Text>
+        {isDownloaded && !isDownloading && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>Çevrimdışı hazır</Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -200,6 +261,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#cccccc',
     opacity: 0.6,
   },
+  downloadedCard: {
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+  },
   coverImage: {
     width: '100%',
     height: itemWidth * 1.3,
@@ -210,6 +275,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 6,
+    textAlign: 'center',
+  },
+  badge: {
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: '#4CAF50',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
     textAlign: 'center',
   },
 });
