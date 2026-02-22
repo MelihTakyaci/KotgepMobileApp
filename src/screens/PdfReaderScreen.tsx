@@ -9,7 +9,6 @@ import {
   findExistingPdfUri,
   resolveFilename,
 } from '../hooks/useDownloadedMagazines';
-import { supabase } from '../services/supabase';
 import { COLORS } from '../theme/theme';
 import { PDF_STORAGE_URL } from '../config/constants';
 
@@ -157,7 +156,14 @@ export default function PdfReaderScreen() {
     }
   }, []);
 
-  useEffect(() => () => { cleanupTempFile().catch(() => {}); }, [cleanupTempFile]);
+  useEffect(() => () => {
+    // Run cleanup directly to avoid stale-closure issues with cleanupTempFile
+    if (tempOnlineFileRef.current) {
+      const p = tempOnlineFileRef.current;
+      tempOnlineFileRef.current = null;
+      FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {});
+    }
+  }, []);
 
   const effectiveKey = useMemo(() => storageKey ?? uri ?? DEFAULT_PDF_URL, [storageKey, uri]);
 
@@ -255,13 +261,19 @@ export default function PdfReaderScreen() {
     return () => { cancelled = true; };
   }, [localFileUri, effectiveKey]);
 
-  const handleWebViewMessage = (event: WebViewMessageEvent) => {
+  const handleWebViewMessage = useCallback((event: WebViewMessageEvent) => {
     const payload = event.nativeEvent.data;
     if (payload === 'pdf-render-complete') { setLoading(false); return; }
-    try { const parsed = JSON.parse(payload); if (parsed?.type === 'error') { setError('Görüntüleyici hata verdi'); setLoading(false); } } catch (e) { }
-  };
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed?.type === 'error') { setError('Görüntüleyici hata verdi'); setLoading(false); }
+    } catch { /* malformed message from WebView — safe to ignore */ }
+  }, []);
 
-  const handleWebViewError = () => { setError('Görüntüleyici hata verdi'); setLoading(false); };
+  const handleWebViewError = useCallback(() => {
+    setError('Görüntüleyici hata verdi');
+    setLoading(false);
+  }, []);
 
   return (
     <View style={styles.container}>

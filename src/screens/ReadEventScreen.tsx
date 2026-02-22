@@ -49,18 +49,18 @@ export default function ReadEventScreen() {
 
   // Measure remote image intrinsic sizes so we can render them responsively
   useEffect(() => {
-    if (!images || !images.length) return;
+    if (!images?.length) return;
+    let isMounted = true;
     images.forEach((img) => {
       const uri = img?.image_url;
       if (!uri || imageSizes[uri]) return;
       Image.getSize(
         uri,
-        (w, h) => setImageSizes((s) => ({ ...s, [uri]: { w, h } })),
-        () => {
-          // ignore errors - keep fallback
-        }
+        (w, h) => { if (isMounted) setImageSizes((s) => ({ ...s, [uri]: { w, h } })); },
+        () => { /* ignore size errors — fallback aspect ratio is used */ }
       );
     });
+    return () => { isMounted = false; };
   }, [images]);
 
   if (loading) {
@@ -109,7 +109,7 @@ export default function ReadEventScreen() {
               const clampedHeight = Math.max(120, Math.min(900, height));
               return (
                 <Image
-                  key={index}
+                  key={uri ?? index}
                   source={{ uri }}
                   style={[styles.image, { width: imageWidth, height: clampedHeight }]}
                   resizeMode="cover"

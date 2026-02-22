@@ -42,12 +42,10 @@ export default function EventScreen() {
 
     const { data, error } = await supabase
       .from('events')
-      .select('*')
+      .select('id, title, cover_image')
       .order('id', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching events:', error.message);
-    } else if (data) {
+    if (!error && data) {
       setEvents(data as EventItem[]);
     }
 
@@ -64,11 +62,11 @@ export default function EventScreen() {
     fetchEvents({ silent: true });
   };
 
-  const handleEventPress = (eventId: number) => {
+  const handleEventPress = useCallback((eventId: number) => {
     navigation.navigate('HaberOku', { eventId });
-  };
+  }, [navigation]);
 
-  const renderItem = ({ item }: { item: EventItem }) => (
+  const renderItem = useCallback(({ item }: { item: EventItem }) => (
     <TouchableOpacity
       style={[styles.card, { width: itemWidth, height: itemHeight }]}
       activeOpacity={0.9}
@@ -88,7 +86,7 @@ export default function EventScreen() {
         </View>
       </ImageBackground>
     </TouchableOpacity>
-  );
+  ), [itemWidth, itemHeight, handleEventPress]);
 
   if (loading && !events.length) {
     return (
@@ -103,12 +101,14 @@ export default function EventScreen() {
   return (
     <Layout>
       <FlatList
+        key={responsiveNumColumns}
         data={events}
         renderItem={renderItem}
         keyExtractor={(item) => item.id.toString()}
         numColumns={responsiveNumColumns}
         columnWrapperStyle={responsiveNumColumns > 1 ? styles.columnWrapper : undefined}
         contentContainerStyle={styles.listContent}
+        removeClippedSubviews
         ListHeaderComponent={
           <View style={styles.headerContainer}>
             <WeatherHeader initialCity="Prizren" />
@@ -146,9 +146,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   card: {
-    flex: 1,
-    flexBasis: '48%',
-    maxWidth: '48%',
     height: 210,
     borderRadius: SIZES.radius,
     overflow: 'hidden',

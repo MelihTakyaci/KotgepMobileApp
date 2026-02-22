@@ -10,6 +10,7 @@ import HomeScreen from '../screens/HomeScreen';
 import EventScreen from '../screens/EventScreen';
 import ReadEventScreen from '../screens/ReadEventScreen';
 import PdfReaderScreen from '../screens/PdfReaderScreen';
+import AnnouncementDetail from '../screens/AnnouncementDetail';
 import { COLORS } from '../theme/theme';
 
 const Tab = createBottomTabNavigator();
@@ -39,7 +40,7 @@ function AnaSayfaStack() {
       }}
     >
       <Stack.Screen name="Home" component={HomeScreen} />
-      <Stack.Screen name="AnnouncementDetail" component={require('../screens/AnnouncementDetail').default} />
+      <Stack.Screen name="AnnouncementDetail" component={AnnouncementDetail} />
     </Stack.Navigator>
   );
 }

@@ -8,7 +8,6 @@ import {
   Image,
   TouchableOpacity,
   FlatList,
-  Dimensions,
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
@@ -22,6 +21,49 @@ import fetchAnnouncements from '../services/fetchAnnouncements';
 import WeatherHeader from '../components/WeatherHeader';
 import { COLORS, SIZES } from '../theme/theme';
 import { IMAGE_STORAGE_URL, PDF_STORAGE_URL } from '../config/constants';
+
+// ─── Module-level helpers & sub-components ───────────────────────────────────
+
+const TYPE_ICONS: Record<string, string> = {
+  duyuru: 'bullhorn',
+  etkinlik: 'calendar',
+  onemli: 'alert-circle',
+};
+
+const buildImageUrl = (path?: string) =>
+  path && /^https?:\/\//i.test(path) ? path : `${IMAGE_STORAGE_URL}${path}`;
+
+const buildRemoteUrl = (pdfPath?: string) =>
+  pdfPath && /^https?:\/\//i.test(pdfPath) ? pdfPath : `${PDF_STORAGE_URL}${pdfPath}`;
+
+// Extracted to module scope so it is never re-created on HomeScreen re-renders.
+// Keeping it here prevents React from unmounting/remounting every AnnouncementImage
+// on each parent render (which would also lose the `failed` state).
+const AnnouncementImage: React.FC<{ uri?: string; style?: any; type?: string }> = ({ uri, style, type }) => {
+  const [failed, setFailed] = useState(false);
+  const typeKey = (type || '').toLowerCase();
+  const iconName = TYPE_ICONS[typeKey] ?? 'image-off';
+
+  if (!uri || failed) {
+    return (
+      <View style={[styles.announcementImagePlaceholder, style || {}]}>
+        <View style={styles.announcementIconWrap}>
+          <MaterialCommunityIcons name={iconName as any} size={28} color={COLORS.muted} />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri: buildImageUrl(uri) }}
+      style={[styles.announcementImage, style || {}]}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Home hub UI: hero, announcements, events, programs, magazine highlight, optional weather
 
@@ -38,9 +80,6 @@ type Announcement = {
 type EventPhoto = { id: number; src?: string; title?: string };
 
 type Magazine = { id: number; issue_number?: number; month?: string; pdf_path?: string };
-
-const screenWidth = Dimensions.get('window').width;
-const cardWidth = Math.round(screenWidth * 0.68);
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
@@ -125,20 +164,6 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  const BASE_PDF_URL = PDF_STORAGE_URL;
-  const BASE_IMAGE_URL = IMAGE_STORAGE_URL;
-
-  const buildImageUrl = (path?: string) =>
-    path && /^https?:\/\//i.test(path) ? path : `${BASE_IMAGE_URL}${path}`;
-
-  const buildRemoteUrl = (pdfPath?: string) =>
-    pdfPath && /^https?:\/\//i.test(pdfPath) ? pdfPath : `${BASE_PDF_URL}${pdfPath}`;
-
-  const TYPE_ICONS: Record<string, string> = {
-    duyuru: 'bullhorn',
-    etkinlik: 'calendar',
-    onemli: 'alert-circle',
-  };
 
   const goToLibraryRead = () => {
     if (latestMagazine && latestMagazine.pdf_path) {
@@ -165,32 +190,7 @@ export default function HomeScreen() {
     });
   };
 
-  // Small helper component to render announcement image with graceful fallback
-  const AnnouncementImage: React.FC<{ uri?: string; style?: any; type?: string }> = ({ uri, style, type }) => {
-    const [failed, setFailed] = useState(false);
-    const typeKey = (type || '').toLowerCase();
-    const iconName = TYPE_ICONS[typeKey] ?? 'image-off';
-
-    if (!uri || failed) {
-      return (
-        <View style={[styles.announcementImagePlaceholder, style || {}]}>
-          <View style={styles.announcementIconWrap}>
-            <MaterialCommunityIcons name={iconName as any} size={28} color={COLORS.muted} />
-          </View>
-        </View>
-      );
-    }
-
-    return (
-      <Image
-        source={{ uri: buildImageUrl(uri) }}
-        style={[styles.announcementImage, style || {}]}
-        onError={() => setFailed(true)}
-      />
-    );
-  };
-
-  const renderAnnouncement = ({ item }: { item: Announcement }) => (
+  const renderAnnouncement = useCallback(({ item }: { item: Announcement }) => (
     <TouchableOpacity
       style={[styles.announcementCard, { width: responsiveAnnouncementWidth }]}
       activeOpacity={0.88}
@@ -216,9 +216,9 @@ export default function HomeScreen() {
         )}
       </View>
     </TouchableOpacity>
-  );
+  ), [responsiveAnnouncementWidth, navigation]);
 
-  const renderEventItem = ({ item }: { item: EventPhoto }) => (
+  const renderEventItem = useCallback(({ item }: { item: EventPhoto }) => (
     <TouchableOpacity
       style={styles.eventPhotoCard}
       activeOpacity={0.9}
@@ -230,7 +230,7 @@ export default function HomeScreen() {
         <View style={styles.eventPlaceholder} />
       )}
     </TouchableOpacity>
-  );
+  ), [navigation]);
 
   return (
     <Layout>
@@ -271,10 +271,12 @@ export default function HomeScreen() {
             data={announcements}
             renderItem={renderAnnouncement}
             horizontal
+            scrollEnabled={false}
             showsHorizontalScrollIndicator={false}
             keyExtractor={(i) => i.id.toString()}
             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
             contentContainerStyle={{ paddingVertical: 8 }}
+            removeClippedSubviews
           />
         ) : (
           <View style={{ paddingVertical: 18, alignItems: 'center' }}>
@@ -295,10 +297,12 @@ export default function HomeScreen() {
           data={eventsPhotos}
           renderItem={renderEventItem}
           horizontal
+          scrollEnabled={false}
           showsHorizontalScrollIndicator={false}
           keyExtractor={(i) => i.id.toString()}
           ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
           contentContainerStyle={{ paddingVertical: 8 }}
+          removeClippedSubviews
         />
       </View>
 
@@ -384,7 +388,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  content: { padding: SIZES.padding, paddingBottom: 40 },
+  content: { paddingTop: SIZES.padding, paddingBottom: 40 },
   hero: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -439,7 +443,7 @@ const styles = StyleSheet.create({
 
   // Announcements
   announcementCard: {
-    width: cardWidth,
+    width: 260,
     backgroundColor: '#fff',
     borderRadius: 12,
     overflow: 'hidden',

@@ -74,8 +74,8 @@ export const findExistingPdfUri = async (path: string): Promise<DownloadedPdfInf
           modificationTime: info.modificationTime ?? null,
         };
       }
-    } catch (error) {
-      console.warn('PDF konumu kontrolü başarısız:', error);
+    } catch {
+      // location check failed — treat as not found
     }
   }
 
@@ -107,7 +107,7 @@ export const listDownloadedPdfs = async () => {
       ) {
         continue;
       }
-      console.warn('PDF dizini okunamadı:', error);
+      /* unexpected read error — skip directory */
     }
   }
 
@@ -141,8 +141,8 @@ export const deletePdf = async (path: string) => {
   for (const candidate of candidates) {
     try {
       await FileSystem.deleteAsync(candidate, { idempotent: true });
-    } catch (error) {
-      console.warn('PDF silinirken hata oluştu:', error);
+    } catch {
+      // delete failed — file may already be gone, safe to ignore
     }
   }
 };

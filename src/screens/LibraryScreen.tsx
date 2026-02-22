@@ -116,7 +116,7 @@ export default function LibraryScreen() {
     refreshDownloadStatuses(magazines).catch(() => {});
   }, [magazines, refreshDownloadStatuses]);
 
-  const handleCardPress = async (item: MagazineIssue) => {
+  const handleCardPress = useCallback(async (item: MagazineIssue) => {
     const existing = await findExistingPdfUri(item.pdf_path);
     const isDownloaded = !!existing;
     const isDownloading = downloadingIds.includes(item.id);
@@ -180,9 +180,9 @@ export default function LibraryScreen() {
       ],
       { cancelable: true }
     );
-  };
+  }, [navigation, magazines, downloadedUris, refreshDownloadStatuses]);
 
-  const renderItem = ({ item }: { item: MagazineIssue }) => {
+  const renderItem = useCallback(({ item }: { item: MagazineIssue }) => {
     const isDownloading = downloadingIds.includes(item.id);
     const isDownloaded = Boolean(downloadedUris[item.pdf_path]);
     const isNewest = latestIssue?.id === item.id;
@@ -247,7 +247,7 @@ export default function LibraryScreen() {
         </ImageBackground>
       </TouchableOpacity>
     );
-  };
+  }, [downloadingIds, downloadedUris, latestIssue, computedCardWidth, handleCardPress]);
 
   if (loading) {
     return (
@@ -262,12 +262,14 @@ export default function LibraryScreen() {
   return (
     <Layout>
       <FlatList
+        key={responsiveNumColumns}
         data={magazines}
         renderItem={renderItem}
         keyExtractor={(item) => item.id.toString()}
         numColumns={responsiveNumColumns}
         contentContainerStyle={styles.listContainer}
         columnWrapperStyle={responsiveNumColumns > 1 ? styles.row : undefined}
+        removeClippedSubviews
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View style={styles.listHeader}>

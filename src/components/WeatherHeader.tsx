@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -105,7 +105,7 @@ export default function WeatherHeader({ initialCity = 'Prizren' }: { initialCity
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
 
-  const fetchWeather = async () => {
+  const fetchWeather = useCallback(async () => {
     try {
       setLoading(true);
       setWeather(null);
@@ -117,11 +117,11 @@ export default function WeatherHeader({ initialCity = 'Prizren' }: { initialCity
     } finally {
       setLoading(false);
     }
-  };
+  }, [city]);
 
   useEffect(() => {
     fetchWeather();
-  }, [city]);
+  }, [fetchWeather]);
 
   const handleCitySelect = (selected: string) => {
     setCity(selected);
