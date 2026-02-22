@@ -4,11 +4,10 @@ import { supabase } from './supabase'
 export async function fetchEvents() {
   const { data, error } = await supabase
     .from('events')
-    .select('*')
-    .order('id', { ascending: true })
+    .select('id, title, cover_image')
+    .order('id', { ascending: false })
 
   if (error) {
-    console.error('Error fetching events:', error.message)
     return []
   }
 

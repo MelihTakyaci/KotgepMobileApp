@@ -109,6 +109,9 @@ export default function EventScreen() {
         columnWrapperStyle={responsiveNumColumns > 1 ? styles.columnWrapper : undefined}
         contentContainerStyle={styles.listContent}
         removeClippedSubviews
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={7}
         ListHeaderComponent={
           <View style={styles.headerContainer}>
             <WeatherHeader initialCity="Prizren" />

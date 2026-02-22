@@ -99,18 +99,44 @@ const resolveWeatherIcon = (condition?: string, iconCode?: string): IconName => 
   return isNight ? iconSet.night : iconSet.day;
 };
 
+// Module-level TTL cache — shared across all WeatherHeader instances.
+// Prevents duplicate API calls when multiple screens mount the component simultaneously.
+const WEATHER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const weatherCache = new Map<string, { data: any; timestamp: number }>();
+
+const getCachedWeather = (city: string): any | null => {
+  const entry = weatherCache.get(city);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > WEATHER_CACHE_TTL_MS) {
+    weatherCache.delete(city);
+    return null;
+  }
+  return entry.data;
+};
+
+const setCachedWeather = (city: string, data: any) => {
+  weatherCache.set(city, { data, timestamp: Date.now() });
+};
+
 export default function WeatherHeader({ initialCity = 'Prizren' }: { initialCity?: string }) {
   const [city, setCity] = useState(initialCity);
-  const [weather, setWeather] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [weather, setWeather] = useState<any>(() => getCachedWeather(initialCity));
+  const [loading, setLoading] = useState(() => !getCachedWeather(initialCity));
   const [modalVisible, setModalVisible] = useState(false);
 
   const fetchWeather = useCallback(async () => {
+    const cached = getCachedWeather(city);
+    if (cached) {
+      setWeather(cached);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setWeather(null);
       const response = await fetch(`${WEATHER_FUNCTION_URL}?city=${city}`);
       const result = await response.json();
+      setCachedWeather(city, result.data);
       setWeather(result.data);
     } catch {
       setWeather(null);

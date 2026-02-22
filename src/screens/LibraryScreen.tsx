@@ -9,7 +9,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Dimensions,
   useWindowDimensions,
 } from 'react-native';
 import { supabase } from '../services/supabase';
@@ -270,6 +269,9 @@ export default function LibraryScreen() {
         contentContainerStyle={styles.listContainer}
         columnWrapperStyle={responsiveNumColumns > 1 ? styles.row : undefined}
         removeClippedSubviews
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={5}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View style={styles.listHeader}>
@@ -338,10 +340,8 @@ export default function LibraryScreen() {
   );
 }
 
-const screenWidth = Dimensions.get('window').width;
-const contentWidth = screenWidth - SIZES.padding * 2;
-const cardGap = 16;
-const cardWidth = (contentWidth - cardGap) / 2;
+// Dead module-level variables removed — card dimensions are computed
+// responsively via useWindowDimensions() inside the component.
 
 const styles = StyleSheet.create({
   loadingContainer: {
@@ -502,7 +502,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   card: {
-    width: cardWidth,
     borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: '#0F172A',
@@ -518,7 +517,6 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: cardWidth * 1.4,
     justifyContent: 'flex-end',
   },
   cardImageRadius: {

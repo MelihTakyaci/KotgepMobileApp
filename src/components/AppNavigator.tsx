@@ -1,5 +1,6 @@
 // src/components/AppNavigator.tsx
 import React from 'react';
+import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator, TransitionPresets } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
@@ -16,14 +17,15 @@ import { COLORS } from '../theme/theme';
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Her ekran için bir Stack tanımı
+// Platform-appropriate slide transition
+const slideTransition = Platform.OS === 'android'
+  ? TransitionPresets.FadeFromRightAndroid
+  : TransitionPresets.SlideFromRightIOS;
+
 function KutuphaneStack() {
   return (
     <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        ...TransitionPresets.SlideFromRightIOS,
-      }}
+      screenOptions={{ headerShown: false, ...slideTransition }}
     >
       <Stack.Screen name="Library" component={LibraryScreen} />
       <Stack.Screen name="PdfReader" component={PdfReaderScreen} />
@@ -34,10 +36,7 @@ function KutuphaneStack() {
 function AnaSayfaStack() {
   return (
     <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        ...TransitionPresets.FadeFromBottomAndroid,
-      }}
+      screenOptions={{ headerShown: false, ...slideTransition }}
     >
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="AnnouncementDetail" component={AnnouncementDetail} />
@@ -48,10 +47,7 @@ function AnaSayfaStack() {
 function HaberlerStack() {
   return (
     <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        ...TransitionPresets.SlideFromRightIOS,
-      }}
+      screenOptions={{ headerShown: false, ...slideTransition }}
     >
       <Stack.Screen name="NewsList" component={EventScreen} />
       <Stack.Screen name="HaberOku" component={ReadEventScreen} />
