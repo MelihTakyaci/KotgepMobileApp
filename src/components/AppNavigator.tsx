@@ -3,12 +3,14 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator, TransitionPresets } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 
 import LibraryScreen from '../screens/LibraryScreen';
 import HomeScreen from '../screens/HomeScreen';
 import EventScreen from '../screens/EventScreen';
 import ReadEventScreen from '../screens/ReadEventScreen';
+import PdfReaderScreen from '../screens/PdfReaderScreen';
+import { COLORS } from '../theme/theme';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -22,7 +24,8 @@ function KutuphaneStack() {
         ...TransitionPresets.SlideFromRightIOS,
       }}
     >
-      <Stack.Screen name="KütüphaneAna" component={LibraryScreen} />
+      <Stack.Screen name="Library" component={LibraryScreen} />
+      <Stack.Screen name="PdfReader" component={PdfReaderScreen} />
     </Stack.Navigator>
   );
 }
@@ -35,7 +38,8 @@ function AnaSayfaStack() {
         ...TransitionPresets.FadeFromBottomAndroid,
       }}
     >
-      <Stack.Screen name="AnaSayfaAna" component={HomeScreen} />
+      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="AnnouncementDetail" component={require('../screens/AnnouncementDetail').default} />
     </Stack.Navigator>
   );
 }
@@ -48,7 +52,7 @@ function HaberlerStack() {
         ...TransitionPresets.SlideFromRightIOS,
       }}
     >
-      <Stack.Screen name="HaberlerAna" component={EventScreen} />
+      <Stack.Screen name="NewsList" component={EventScreen} />
       <Stack.Screen name="HaberOku" component={ReadEventScreen} />
     </Stack.Navigator>
   );
@@ -57,22 +61,62 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Tab.Navigator
+        initialRouteName="NewsTab"
         screenOptions={({ route }) => ({
           tabBarIcon: ({ focused, color, size }) => {
-            let iconName = 'book';
-            if (route.name === 'Kütüphane') iconName = focused ? 'library' : 'library-outline';
-            else if (route.name === 'Ana Sayfa') iconName = focused ? 'book' : 'book-outline';
-            else if (route.name === 'Haberler') iconName = focused ? 'newspaper' : 'newspaper-outline';
-            return <Ionicons name={iconName} size={size} color={color} />;
+            const iconName: React.ComponentProps<typeof MaterialIcons>['name'] =
+              route.name === 'LibraryTab'
+                ? 'menu-book'
+                : route.name === 'HomeTab'
+                ? 'home'
+                : 'feed';
+
+            const iconSize = focused ? size + 4 : size;
+            return <MaterialIcons name={iconName} size={iconSize} color={color} />;
           },
-          tabBarActiveTintColor: '#3E64FF',
-          tabBarInactiveTintColor: 'gray',
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.muted,
           headerShown: false,
+          sceneContainerStyle: {
+            backgroundColor: COLORS.background,
+          },
+          tabBarStyle: {
+            backgroundColor: COLORS.surface,
+            borderTopColor: COLORS.secondary,
+            borderTopWidth: 1,
+            paddingVertical: 6,
+            height: 72,
+            shadowColor: '#000000',
+            shadowOpacity: 0.06,
+            shadowOffset: { width: 0, height: -2 },
+            shadowRadius: 8,
+            elevation: 12,
+          },
+          tabBarLabelStyle: {
+            fontSize: 12,
+            marginTop: 2,
+            fontWeight: '500',
+          },
+          tabBarIconStyle: {
+            marginBottom: -2,
+          },
         })}
       >
-        <Tab.Screen name="Kütüphane" component={KutuphaneStack} />
-        <Tab.Screen name="Ana Sayfa" component={AnaSayfaStack} />
-        <Tab.Screen name="Haberler" component={HaberlerStack} />
+        <Tab.Screen
+          name="LibraryTab"
+          component={KutuphaneStack}
+          options={{ tabBarLabel: 'Kütüphane' }}
+        />
+        <Tab.Screen
+          name="HomeTab"
+          component={AnaSayfaStack}
+          options={{ tabBarLabel: 'Ana Sayfa' }}
+        />
+        <Tab.Screen
+          name="NewsTab"
+          component={HaberlerStack}
+          options={{ tabBarLabel: 'Haberler' }}
+        />
       </Tab.Navigator>
     </NavigationContainer>
   );

@@ -1,541 +1,526 @@
 // HomeScreen.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, ActivityIndicator, Text, Platform } from 'react-native';
-import { useRoute, useFocusEffect } from '@react-navigation/native';
-import * as FileSystem from 'expo-file-system/legacy';
-import { WebView } from 'react-native-webview';
-import type { WebViewMessageEvent } from 'react-native-webview';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  downloadPdf as downloadForOffline,
-  findExistingPdfUri,
-  resolveFilename,
-} from '../hooks/useDownloadedMagazines';
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  FlatList,
+  Dimensions,
+  ActivityIndicator,
+  useWindowDimensions,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import Layout from '../components/Layout';
+import { RefreshControl } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { supabase } from '../services/supabase';
+import { fetchLatestMagazine } from '../services/fetchLatestMagazine';
+import fetchAnnouncements from '../services/fetchAnnouncements';
+import WeatherHeader from '../components/WeatherHeader';
+import { COLORS, SIZES } from '../theme/theme';
+import { IMAGE_STORAGE_URL, PDF_STORAGE_URL } from '../config/constants';
 
-// =======================
-// AYARLAR / SABİTLER
-// =======================
-const DEFAULT_PDF_URL = 'https://kotgep.com/dergi/Dergi-Sayi-8.pdf';
+// Home hub UI: hero, announcements, events, programs, magazine highlight, optional weather
 
-type RouteParams = {
-  mode?: 'offline' | 'online'; // offline: yerelden aç, online: DB'den URL çek
-  articleId?: string;          // online modda DB'den URL çekerken referans
-  uri?: string;                // override için: özel PDF linki (remote veya local)
-  storageKey?: string;         // indirme klasöründe kullanılacak anahtar
+type Announcement = {
+  id: number;
+  title: string;
+  type?: string; // "New" | "Event" | "Announcement" (mapped from announcement_type)
+  image_url?: string;
+  content?: string;
+  is_published?: boolean;
+  created_at?: string;
 };
 
-// =======================
-// PLACEHOLDER: DB'DEN URL ÇEKME
-// Burayı kendi API'nle değiştir (Supabase/Firestore/REST vs.)
-// =======================
-async function fetchPdfUrlFromDB(articleId?: string): Promise<string> {
-  // Örnek: id geldiyse onun URL'sini ver, yoksa default
-  // TODO: kendi endpoint’ine GET çağrısı yapıp JSON’dan pdfUrl al:
-  // const res = await fetch(`https://api.senin-domenin.com/articles/${articleId}`);
-  // const { pdfUrl } = await res.json();
-  // return pdfUrl;
+type EventPhoto = { id: number; src?: string; title?: string };
 
-  return DEFAULT_PDF_URL;
-}
+type Magazine = { id: number; issue_number?: number; month?: string; pdf_path?: string };
 
-const isRemoteUri = (value: string | null | undefined) =>
-  typeof value === 'string' ? /^https?:\/\//i.test(value) : false;
-
-const isFileUri = (value: string | null | undefined) =>
-  typeof value === 'string' ? value.startsWith('file://') : false;
-
-const ensureTrailingSlash = (value: string) => (value.endsWith('/') ? value : `${value}/`);
-
-const getTempViewerDirectory = () => {
-  const base = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-  if (!base) {
-    throw new Error('Geçici depolama dizinine erişilemedi.');
-  }
-  return `${ensureTrailingSlash(base)}pdf-viewer-temp/`;
-};
-
-const getPdfJsCacheDirectory = () => {
-  const base = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-  if (!base) {
-    throw new Error('PDF görüntüleyici önbelleğine erişilemedi.');
-  }
-  return `${ensureTrailingSlash(base)}pdfjs-cache/`;
-};
-
-const PDF_JS_VERSION = '3.11.174';
-const PDF_JS_BASE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDF_JS_VERSION}/build`;
-
-const escapeForScriptTag = (value: string) => value.replace(/<\/script>/gi, '<\\/script>');
-
-const fetchAndCacheScript = async (fileName: string, url: string) => {
-  const cacheDir = getPdfJsCacheDirectory();
-  const versionedDir = `${cacheDir}${PDF_JS_VERSION}/`;
-  await FileSystem.makeDirectoryAsync(versionedDir, { intermediates: true });
-  const targetPath = `${versionedDir}${fileName}`;
-
-  const info = await FileSystem.getInfoAsync(targetPath);
-  if (info.exists) {
-    return FileSystem.readAsStringAsync(targetPath, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`PDF görüntüleyici betiği indirilemedi (durum ${response.status}).`);
-  }
-  const scriptBody = await response.text();
-  await FileSystem.writeAsStringAsync(targetPath, scriptBody, {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
-  return scriptBody;
-};
-
-const loadPdfViewerScripts = async () => {
-  const [pdfJs, pdfWorker] = await Promise.all([
-    fetchAndCacheScript('pdf.min.js', `${PDF_JS_BASE_URL}/pdf.min.js`),
-    fetchAndCacheScript('pdf.worker.min.js', `${PDF_JS_BASE_URL}/pdf.worker.min.js`),
-  ]);
-
-  return {
-    pdfJs: escapeForScriptTag(pdfJs),
-    pdfWorker,
-  } as const;
-};
-
-const buildPdfJsHtml = (base64Data: string, pdfJsSource: string, pdfWorkerSource: string) => {
-  const workerInitializer = JSON.stringify(pdfWorkerSource);
-  const pdfBase64Json = JSON.stringify(base64Data);
-
-  return `<!DOCTYPE html>
-<html lang="tr">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0" />
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        background-color: #0f0f0f;
-        color: #ffffff;
-        height: 100%;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-      }
-      #viewer {
-        position: relative;
-        min-height: 100%;
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        align-items: center;
-        padding: 16px 8px 32px;
-        box-sizing: border-box;
-      }
-      canvas {
-        max-width: 900px;
-        width: 100%;
-        background-color: #ffffff;
-        border-radius: 4px;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-      }
-      .error {
-        padding: 16px;
-        background-color: rgba(255, 85, 85, 0.2);
-        border: 1px solid rgba(255, 85, 85, 0.35);
-        color: #ffaaaa;
-        border-radius: 4px;
-        max-width: 640px;
-        margin: 48px auto;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        font-size: 14px;
-        text-align: center;
-      }
-    </style>
-    <script>${pdfJsSource}</script>
-  </head>
-  <body>
-    <div id="viewer"></div>
-    <script>
-      (function () {
-        const viewer = document.getElementById('viewer');
-        const workerBlob = new Blob([${workerInitializer}], { type: 'text/javascript' });
-        const workerUrl = URL.createObjectURL(workerBlob);
-        pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-        function notify(message) {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(message);
-          }
-        }
-
-        function showError(message) {
-          viewer.innerHTML = '';
-          const box = document.createElement('div');
-          box.className = 'error';
-          box.textContent = message || 'PDF görüntülenemedi.';
-          viewer.appendChild(box);
-          notify(JSON.stringify({ type: 'error', message: message || 'render-error' }));
-        }
-
-        try {
-          const base64 = ${pdfBase64Json};
-          const binary = atob(base64);
-          const length = binary.length;
-          const bytes = new Uint8Array(length);
-          for (let i = 0; i < length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-
-          pdfjsLib.getDocument({ data: bytes }).promise.then(function (pdf) {
-            const total = pdf.numPages;
-            let rendered = 0;
-
-            const renderPage = function (pageNumber) {
-              pdf.getPage(pageNumber).then(function (page) {
-                const viewport = page.getViewport({ scale: 1.15 });
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-                viewer.appendChild(canvas);
-
-                page.render({ canvasContext: context, viewport: viewport }).promise.then(function () {
-                  rendered += 1;
-                  if (rendered === total) {
-                    notify('pdf-render-complete');
-                  }
-                }).catch(function () {
-                  showError('PDF sayfası çizilemedi.');
-                });
-              }).catch(function () {
-                showError('PDF sayfası yüklenemedi.');
-              });
-            };
-
-            const renderSequentially = function (pageNumber) {
-              if (pageNumber > total) {
-                return;
-              }
-              renderPage(pageNumber);
-              requestAnimationFrame(function () {
-                renderSequentially(pageNumber + 1);
-              });
-            };
-
-            renderSequentially(1);
-          }).catch(function () {
-            showError('PDF dosyası açılamadı.');
-          });
-        } catch (error) {
-          console.error(error);
-          showError('PDF verisi işlenemedi.');
-        }
-
-        window.addEventListener('unload', function () {
-          URL.revokeObjectURL(workerUrl);
-        });
-      })();
-    </script>
-  </body>
-</html>`;
-};
-
-const downloadPdfForOnlineViewing = async (remoteUrl: string, key: string) => {
-  const tempDir = getTempViewerDirectory();
-  await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
-
-  const targetPath = `${tempDir}${resolveFilename(key)}`;
-  const tempPath = `${targetPath}.download`;
-
-  try {
-    const { status, uri } = await FileSystem.downloadAsync(remoteUrl, tempPath);
-    if (status && (status < 200 || status >= 300)) {
-      throw new Error(`PDF uzaktan indirilemedi (durum kodu: ${status})`);
-    }
-
-    await FileSystem.deleteAsync(targetPath, { idempotent: true });
-    await FileSystem.moveAsync({ from: uri, to: targetPath });
-    return targetPath;
-  } catch (error) {
-    await FileSystem.deleteAsync(tempPath, { idempotent: true });
-    throw error;
-  }
-};
-
-// =======================
-// ANA EKRAN
-// =======================
+const screenWidth = Dimensions.get('window').width;
+const cardWidth = Math.round(screenWidth * 0.68);
 
 export default function HomeScreen() {
-  const route = useRoute();
-  const { mode = 'offline', articleId, uri, storageKey } = (route.params || {}) as RouteParams;
-
+  const navigation = useNavigation<any>();
+  const { width } = useWindowDimensions();
+  const responsiveAnnouncementWidth = Math.max(260, Math.round(width * 0.68));
+  const heroLogoSize = Math.min(120, Math.round(width * 0.18));
+  const magCoverWidth = Math.min(160, Math.round(width * 0.28));
   const [loading, setLoading] = useState(true);
-  const [localFileUri, setLocalFileUri] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [viewerHtml, setViewerHtml] = useState<string | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [eventsPhotos, setEventsPhotos] = useState<EventPhoto[]>([]);
+  const [latestMagazine, setLatestMagazine] = useState<Magazine | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const tempOnlineFileRef = useRef<string | null>(null);
-  const pdfResourcesRef = useRef<{ pdfJs: string; pdfWorker: string } | null>(null);
-  const pdfResourcesPromiseRef = useRef<Promise<{ pdfJs: string; pdfWorker: string }> | null>(null);
-  const cleanupTempFile = useCallback(async () => {
-    if (!tempOnlineFileRef.current) {
-      return;
-    }
-    const path = tempOnlineFileRef.current;
-    tempOnlineFileRef.current = null;
+  const fetchData = useCallback(async () => {
+    setLoading(true);
     try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
-    } catch (cleanupError) {
-      console.log('Geçici PDF dosyası silinemedi:', cleanupError);
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      cleanupTempFile().catch(() => {});
-    };
-  }, [cleanupTempFile]);
-
-  const effectiveStorageKey = useMemo(
-    () => storageKey ?? uri ?? DEFAULT_PDF_URL,
-    [storageKey, uri]
-  );
-
-  const ensurePdfJsResources = useCallback(async () => {
-    if (pdfResourcesRef.current) {
-      return pdfResourcesRef.current;
-    }
-
-    if (!pdfResourcesPromiseRef.current) {
-      pdfResourcesPromiseRef.current = loadPdfViewerScripts();
-    }
-
-    const resources = await pdfResourcesPromiseRef.current;
-    pdfResourcesRef.current = resources;
-    return resources;
-  }, []);
-
-  // Ekran odaklandığında PDF'i hazırla
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-
-      const prepare = async () => {
-        setLoading(true);
-        setError(null);
-        setLocalFileUri(null);
-        setViewerHtml(null);
-
-        ensurePdfJsResources().catch((resourceError) => {
-          console.log('PDF viewer kaynakları indirilemedi:', resourceError);
-        });
-
-        try {
-          if (mode === 'online') {
-            const remoteUrl =
-              (isRemoteUri(uri) && uri) || (await fetchPdfUrlFromDB(articleId));
-            if (cancelled) return;
-
-            if (storageKey) {
-              try {
-                const existing = await findExistingPdfUri(storageKey);
-                if (!cancelled && existing) {
-                  await cleanupTempFile();
-                  setLocalFileUri(existing.uri);
-                  return;
-                }
-              } catch (checkError) {
-                console.log('Yerel PDF doğrulanamadı:', checkError);
-              }
-            }
-
-            await cleanupTempFile();
-            const tempPath = await downloadPdfForOnlineViewing(remoteUrl, effectiveStorageKey);
-            if (cancelled) {
-              await FileSystem.deleteAsync(tempPath, { idempotent: true });
-              return;
-            }
-            tempOnlineFileRef.current = tempPath;
-            setLocalFileUri(tempPath);
-            return;
-          }
-
-          await cleanupTempFile();
-
-          // Offline mod: öncelikle parametre olarak gelen yerel URI'yi doğrula
-          if (uri && isFileUri(uri)) {
-            const info = await FileSystem.getInfoAsync(uri);
-            if (!info.exists) {
-              throw new Error('Yerel PDF dosyası bulunamadı.');
-            }
-            if (!cancelled) {
-              setLocalFileUri(uri);
-              return;
-            }
-          }
-
-          // storageKey üzerinden indirilen kopyayı kontrol et
-          try {
-            const existing = await findExistingPdfUri(effectiveStorageKey);
-            if (!cancelled && existing) {
-              setLocalFileUri(existing.uri);
-              return;
-            }
-          } catch (lookupError) {
-            console.log('Önceden indirilen PDF okunamadı:', lookupError);
-          }
-
-          // Gerekirse uzaktan indirip diske kaydet
-          const downloadSource =
-            (uri && isRemoteUri(uri) && uri) || DEFAULT_PDF_URL;
-          const localPath = await downloadForOffline(effectiveStorageKey, downloadSource);
-          if (!cancelled) {
-            setLocalFileUri(localPath);
-          }
-        } catch (err: any) {
-          console.log('PDF hazırlama hatası:', err?.message || err);
-          if (!cancelled) {
-            setError('PDF yüklenemedi.');
-            setLoading(false);
-          }
-        }
-      };
-
-      prepare();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [mode, articleId, uri, storageKey, cleanupTempFile, effectiveStorageKey])
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const prepareHtml = async () => {
-      if (!localFileUri) {
-        setViewerHtml(null);
-        return;
-      }
-
+      // Announcements: use shared service for clarity and reuse
       try {
-        const base64 = await FileSystem.readAsStringAsync(localFileUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const { pdfJs, pdfWorker } = await ensurePdfJsResources();
-        if (!cancelled) {
-          setViewerHtml(buildPdfJsHtml(base64, pdfJs, pdfWorker));
-        }
-      } catch (readError: any) {
-        console.log('PDF içeriği okunamadı:', readError?.message || readError);
-        const messageText =
-          typeof readError?.message === 'string' && readError.message.includes('PDF görüntüleyici betiği')
-            ? 'PDF görüntüleyici kaynakları indirilemedi. Lütfen internet bağlantınızı kontrol edin.'
-            : 'PDF içeriği hazırlanamadı.';
-        if (!cancelled) {
-          setError(messageText);
-          setLoading(false);
+        const annData = await fetchAnnouncements(8);
+        setAnnouncements(
+          annData.map((a) => ({
+            id: a.id,
+            title: a.title,
+            type: a.announcement_type,
+            image_url: a.image_url,
+            content: a.content,
+            is_published: a.is_published,
+            created_at: a.created_at,
+          }))
+        );
+      } catch (e) {
+        setAnnouncements([]);
+      }
+
+      // Events: try 'events' table (cover image + id + title) or fallback to event_photos
+      const { data: eventsData } = await supabase
+        .from('events')
+        .select('id, cover_image, title')
+        .order('id', { ascending: false })
+        .limit(12);
+      if (eventsData && eventsData.length) {
+        setEventsPhotos((eventsData as any[]).map((p) => ({ id: p.id, src: p.cover_image, title: p.title })));
+      } else {
+        // fallback to older event_photos table
+        const { data: photosData } = await supabase
+          .from('event_photos')
+          .select('id, src')
+          .order('id', { ascending: false })
+          .limit(12);
+        if (photosData) {
+          setEventsPhotos((photosData as any[]).map((p) => ({ id: p.id, src: p.src })));
+        } else {
+          setEventsPhotos([
+            { id: 1, src: undefined },
+            { id: 2, src: undefined },
+            { id: 3, src: undefined },
+          ]);
         }
       }
-    };
 
-    prepareHtml();
+      // Latest magazine: use service helper to centralize logic
+      try {
+        const mag = await fetchLatestMagazine();
+        if (mag) setLatestMagazine(mag as Magazine);
+      } catch (e) {
+        // magazine unavailable — UI shows fallback
+      }
+    } catch (err) {
+      // network error — UI shows empty state
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [localFileUri]);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
-  const handleWebViewError = (event: any) => {
-    console.log('PDF viewer error:', event.nativeEvent);
-    setError('PDF görüntüleyici hata verdi.');
-    setLoading(false);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
   };
 
-  const handleWebViewMessage = (event: WebViewMessageEvent) => {
-    const payload = event.nativeEvent.data;
+  const BASE_PDF_URL = PDF_STORAGE_URL;
+  const BASE_IMAGE_URL = IMAGE_STORAGE_URL;
 
-    if (payload === 'pdf-render-complete') {
-      setLoading(false);
+  const buildImageUrl = (path?: string) =>
+    path && /^https?:\/\//i.test(path) ? path : `${BASE_IMAGE_URL}${path}`;
+
+  const buildRemoteUrl = (pdfPath?: string) =>
+    pdfPath && /^https?:\/\//i.test(pdfPath) ? pdfPath : `${BASE_PDF_URL}${pdfPath}`;
+
+  const TYPE_ICONS: Record<string, string> = {
+    duyuru: 'bullhorn',
+    etkinlik: 'calendar',
+    onemli: 'alert-circle',
+  };
+
+  const goToLibraryRead = () => {
+    if (latestMagazine && latestMagazine.pdf_path) {
+      const remote = buildRemoteUrl(latestMagazine.pdf_path);
+      navigation.navigate('LibraryTab', {
+        screen: 'PdfReader',
+        params: { mode: 'online', uri: remote, storageKey: latestMagazine.pdf_path },
+      });
       return;
     }
-
-    try {
-      const parsed = JSON.parse(payload);
-      if (parsed?.type === 'error') {
-        setError('PDF görüntüleyici hata verdi.');
-        setLoading(false);
-      }
-    } catch (parseError) {
-      console.log('PDF viewer message parse error:', parseError);
-    }
+    // fallback: just switch to the Library tab
+    navigation.navigate('LibraryTab');
   };
+
+  /**
+   * Open the Library stack focused on the "Genç Kalemler" archive/section.
+   * Passing a `section` param lets the Library screen optionally filter or highlight
+   * the requested collection. The Library stack must handle `route.params.section`.
+   */
+  const goToLibraryArchive = (section = 'genc_kalemler') => {
+    navigation.navigate('LibraryTab', {
+      screen: 'Library',
+      params: { section },
+    });
+  };
+
+  // Small helper component to render announcement image with graceful fallback
+  const AnnouncementImage: React.FC<{ uri?: string; style?: any; type?: string }> = ({ uri, style, type }) => {
+    const [failed, setFailed] = useState(false);
+    const typeKey = (type || '').toLowerCase();
+    const iconName = TYPE_ICONS[typeKey] ?? 'image-off';
+
+    if (!uri || failed) {
+      return (
+        <View style={[styles.announcementImagePlaceholder, style || {}]}>
+          <View style={styles.announcementIconWrap}>
+            <MaterialCommunityIcons name={iconName as any} size={28} color={COLORS.muted} />
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <Image
+        source={{ uri: buildImageUrl(uri) }}
+        style={[styles.announcementImage, style || {}]}
+        onError={() => setFailed(true)}
+      />
+    );
+  };
+
+  const renderAnnouncement = ({ item }: { item: Announcement }) => (
+    <TouchableOpacity
+      style={[styles.announcementCard, { width: responsiveAnnouncementWidth }]}
+      activeOpacity={0.88}
+      onPress={() => navigation.navigate('AnnouncementDetail', { ...item })}
+    >
+      <View style={styles.announcementImagePlaceholder}>
+        <AnnouncementImage uri={item.image_url} type={item.type} />
+      </View>
+      <View style={styles.announcementBody}>
+        <Text numberOfLines={2} style={styles.announcementTitle}>{item.title}</Text>
+        {item.type && (
+          <View style={[styles.badge, styles.badgeSmall]}>
+            <Text style={styles.badgeTextSmall}>
+              {item.type?.toLowerCase() === 'duyuru'
+                ? 'Duyuru'
+                : item.type?.toLowerCase() === 'etkinlik'
+                ? 'Etkinlik'
+                : item.type?.toLowerCase() === 'onemli'
+                ? 'Önemli'
+                : item.type}
+            </Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderEventItem = ({ item }: { item: EventPhoto }) => (
+    <TouchableOpacity
+      style={styles.eventPhotoCard}
+      activeOpacity={0.9}
+      onPress={() => navigation.navigate('NewsTab', { screen: 'HaberOku', params: { eventId: item.id } })}
+    >
+      {item.src ? (
+        <Image source={{ uri: item.src }} style={styles.eventPhoto} />
+      ) : (
+        <View style={styles.eventPlaceholder} />
+      )}
+    </TouchableOpacity>
+  );
 
   return (
-    <View style={styles.container}>
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" />
+    <Layout>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingBottom: 40 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+      {/* Hero / intro */}
+      <View style={styles.hero}>
+        <View style={styles.heroInner}>
+          <Image source={require('../assets/genckalemler.png')} style={[styles.heroLogo, { width: heroLogoSize, height: heroLogoSize }]} resizeMode="contain" />
+          <Text style={styles.heroTitle}>KOTGEP — Genç Kalemler</Text>
+          <Text style={styles.heroSubtitle}>Kosova’da yaşayan Türk gençlerinin eğitim, kültür ve sosyal becerilerini geliştirerek topluma aktif katkı sağlamalarına destek olan dinamik bir gençlik platformu.</Text>
+          <View style={styles.heroActions}>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => goToLibraryArchive()}>
+              <Text style={styles.primaryButtonText}>Dergiyi Oku</Text>
+            </TouchableOpacity>
+              <TouchableOpacity style={styles.ghostButton} onPress={() => navigation.navigate('NewsTab')}> 
+              <Text style={styles.ghostButtonText}>Haberler</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      )}
+      </View>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
+      {/* Announcements */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Duyurular</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('NewsTab')}>
+            <Text style={styles.sectionAction}>Tümü</Text>
+          </TouchableOpacity>
         </View>
-      ) : viewerHtml ? (
-        <WebView
-          originWhitelist={['*']}
-          source={{ html: viewerHtml, baseUrl: '' }}
-          style={styles.webView}
-          onError={handleWebViewError}
-          onHttpError={handleWebViewError}
-          allowFileAccess={Platform.OS === 'android'}
-          allowFileAccessFromFileURLs={Platform.OS === 'android'}
-          allowUniversalAccessFromFileURLs={Platform.OS === 'android'}
-          javaScriptEnabled
-          domStorageEnabled
-          onMessage={handleWebViewMessage}
+        {loading ? (
+          <ActivityIndicator size="small" />
+        ) : announcements && announcements.length ? (
+          <FlatList
+            data={announcements}
+            renderItem={renderAnnouncement}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(i) => i.id.toString()}
+            ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+            contentContainerStyle={{ paddingVertical: 8 }}
+          />
+        ) : (
+          <View style={{ paddingVertical: 18, alignItems: 'center' }}>
+            <Text style={{ color: '#6B7280' }}>Henüz gösterilecek duyuru yok.</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Event gallery */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Etkinlikler</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('NewsTab')}>
+            <Text style={styles.sectionAction}>Tümü</Text>
+          </TouchableOpacity>
+        </View>
+        <FlatList
+          data={eventsPhotos}
+          renderItem={renderEventItem}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(i) => i.id.toString()}
+          ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+          contentContainerStyle={{ paddingVertical: 8 }}
         />
-      ) : null}
-    </View>
+      </View>
+
+      {/* Our Mission - Misyonumuz */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Misyonumuz</Text>
+        </View>
+        <View style={styles.missionCard}>
+          <View style={styles.missionIconContainer}>
+            <MaterialCommunityIcons name="flag" size={32} color="#C60000" />
+          </View>
+          <View style={styles.missionContent}>
+            <Text style={styles.missionText}>
+              Kosova'da yaşayan Türk gençlerinin eğitim, kültür ve sosyal becerilerini geliştirerek 
+              topluma aktif katkı sağlamalarına destek olan dinamik bir gençlik platformuyuz.
+            </Text>
+            <View style={styles.missionPoints}>
+              <View style={styles.missionPoint}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#22C55E" />
+                <Text style={styles.missionPointText}>Eğitim ve Kültür</Text>
+              </View>
+              <View style={styles.missionPoint}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#22C55E" />
+                <Text style={styles.missionPointText}>Sosyal Gelişim</Text>
+              </View>
+              <View style={styles.missionPoint}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#22C55E" />
+                <Text style={styles.missionPointText}>Toplumsal Katılım</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Magazine highlight */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Genç Kalemler</Text>
+          <TouchableOpacity onPress={() => goToLibraryArchive()}>
+            <Text style={styles.sectionAction}>Arşiv</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.magazineHighlight}>
+            {loading ? (
+            <ActivityIndicator size="small" />
+          ) : latestMagazine ? (
+            <>
+              {latestMagazine ? (
+                <Image
+                  source={{ uri: buildImageUrl(`Dergi-Sayi-${latestMagazine.id}.png`) }}
+                  style={[styles.magCoverPlaceholder, { width: magCoverWidth, height: Math.round(magCoverWidth * 1.36) }]}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.magCoverPlaceholder, { width: magCoverWidth, height: Math.round(magCoverWidth * 1.36) }]} />
+              )}
+              <View style={styles.magMeta}>
+                <Text style={styles.magLabel}>Son Sayı</Text>
+                <Text style={styles.magTitle}>{`Sayı ${latestMagazine.issue_number ?? ''} — ${latestMagazine.month ?? ''}`}</Text>
+                <TouchableOpacity style={styles.readNowButton} onPress={goToLibraryRead}>
+                  <Text style={styles.readNowText}>Oku</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <Text style={{ color: '#6B7280' }}>Son sayı bulunamadı.</Text>
+          )}
+        </View>
+      </View>
+
+      {/* Optional: weather widget (uses WeatherHeader component with city picker) */}
+      <View style={[styles.section, { marginBottom: 80 }]}> 
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Hava Durumu</Text>
+        </View>
+        <WeatherHeader initialCity="Prizren" />
+      </View>
+      </ScrollView>
+    </Layout>
   );
 }
 
-// =======================
-// STİLLER
-// =======================
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  content: { padding: SIZES.padding, paddingBottom: 40 },
+  hero: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 18,
+    shadowColor: 'rgba(2,6,23,0.06)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 22,
+    elevation: 3,
+    overflow: 'hidden',
   },
-  loadingContainer: {
-    position: 'absolute',
-    zIndex: 10,
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
+  heroInner: {
     alignItems: 'center',
-    justifyContent: 'center',
+    padding: 18,
+    backgroundColor: '#F8FAFC',
+  },
+  heroLogo: {
+    width: 84,
+    height: 84,
+    marginBottom: 12,
+  },
+  heroTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  heroSubtitle: { color: '#6B7280', fontSize: 14, textAlign: 'center', marginBottom: 12 },
+  heroActions: { flexDirection: 'row', gap: 10 },
+  primaryButton: {
+    backgroundColor: '#C60000',
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    borderRadius: 10,
+    marginRight: 8,
   },
-  errorBox: {
-    flex: 1,
-    alignItems: 'center',
+  primaryButtonText: { color: '#fff', fontWeight: '700' },
+  ghostButton: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  ghostButtonText: { color: '#111827', fontWeight: '700' },
+
+  section: { marginBottom: 18 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  sectionAction: { color: '#6B7280', fontWeight: '600' },
+
+  // Announcements
+  announcementCard: {
+    width: cardWidth,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: 'rgba(2,6,23,0.06)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  announcementImagePlaceholder: { height: 120, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  announcementImage: { width: '100%', height: '100%' },
+  announcementIconWrap: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center' },
+  announcementBody: { padding: 12 },
+  announcementTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
+
+  badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  badgeSmall: { backgroundColor: '#FEF3F2', marginTop: 6, alignSelf: 'flex-start' },
+  badgeTextSmall: { color: '#C60000', fontWeight: '700', fontSize: 12 },
+
+  // Events
+  eventPhotoCard: { width: 120, height: 86, borderRadius: 10, overflow: 'hidden', backgroundColor: '#F3F4F6' },
+  eventPhoto: { width: '100%', height: '100%' },
+  eventPlaceholder: { flex: 1, backgroundColor: '#E5E7EB' },
+
+  // Mission
+  missionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 18,
+    shadowColor: 'rgba(2,6,23,0.06)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 2,
+  },
+  missionIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEF2F2',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  errorText: {
-    color: 'red',
-    textAlign: 'center',
+  missionContent: {
+    gap: 16,
   },
-  webView: {
-    flex: 1,
-    backgroundColor: '#1c1c1c',
+  missionText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#374151',
+    fontWeight: '500',
   },
+  missionPoints: {
+    gap: 12,
+  },
+  missionPoint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  missionPointText: {
+    fontSize: 15,
+    color: '#111827',
+    fontWeight: '600',
+  },
+
+  // Magazine
+  magazineHighlight: { backgroundColor: '#fff', borderRadius: 12, padding: 12, flexDirection: 'row', gap: 12, alignItems: 'center', shadowColor: 'rgba(2,6,23,0.04)', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.04, shadowRadius: 14, elevation: 2 },
+  magCoverPlaceholder: { width: 110, height: 150, backgroundColor: '#F3F4F6', borderRadius: 8 },
+  magMeta: { flex: 1 },
+  magLabel: { fontSize: 12, color: '#6B7280', fontWeight: '600', marginBottom: 6 },
+  magTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 10 },
+  readNowButton: { backgroundColor: '#C60000', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, alignSelf: 'flex-start' },
+  readNowText: { color: '#fff', fontWeight: '700' },
+
+  // Weather
+  weatherCard: { backgroundColor: '#fff', borderRadius: 12, padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: 'rgba(2,6,23,0.04)', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.04, shadowRadius: 14, elevation: 1 },
+  weatherLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  weatherTemp: { fontSize: 22, fontWeight: '800', color: '#111827' },
+  weatherCity: { color: '#6B7280', fontSize: 13 },
+  weatherRight: { alignItems: 'flex-end' },
+  weatherDesc: { color: '#6B7280' },
 });

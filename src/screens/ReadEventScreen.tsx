@@ -1,15 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Image, Dimensions } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Image, useWindowDimensions, TouchableOpacity } from 'react-native';
+import { useRoute, useNavigation } from '@react-navigation/native';
 import { supabase } from '../services/supabase';
 import Layout from '../components/Layout';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function ReadEventScreen() {
-  const route = useRoute();
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
   const { eventId } = route.params;
 
-  const [haber, setHaber] = useState(null);
-  const [images, setImages] = useState([]);
+  const [haber, setHaber] = useState<any | null>(null);
+  const [images, setImages] = useState<any[]>([]);
+  const { width } = useWindowDimensions();
+  const imageWidth = Math.min(1100, Math.round(width * 0.9));
+  const [imageSizes, setImageSizes] = useState<Record<string, { w: number; h: number }>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,9 +27,7 @@ export default function ReadEventScreen() {
         .limit(1)
         .maybeSingle();
 
-      if (haberError) {
-        console.error('Haber fetch error:', haberError.message);
-      } else {
+      if (!haberError) {
         setHaber(haberData);
       }
 
@@ -34,11 +37,8 @@ export default function ReadEventScreen() {
         .select('*')
         .eq('event_id', eventId);
 
-      if (imageError) {
-        console.error('Image fetch error:', imageError.message);
-      } else {
-        console.log("Gelen görseller:", imageData);
-        setImages(imageData);
+      if (!imageError) {
+        setImages(imageData || []);
       }
 
       setLoading(false);
@@ -46,6 +46,22 @@ export default function ReadEventScreen() {
 
     fetchData();
   }, [eventId]);
+
+  // Measure remote image intrinsic sizes so we can render them responsively
+  useEffect(() => {
+    if (!images || !images.length) return;
+    images.forEach((img) => {
+      const uri = img?.image_url;
+      if (!uri || imageSizes[uri]) return;
+      Image.getSize(
+        uri,
+        (w, h) => setImageSizes((s) => ({ ...s, [uri]: { w, h } })),
+        () => {
+          // ignore errors - keep fallback
+        }
+      );
+    });
+  }, [images]);
 
   if (loading) {
     return (
@@ -66,14 +82,40 @@ export default function ReadEventScreen() {
   return (
     <Layout>
       <ScrollView contentContainerStyle={styles.container}>
+        {/* Back Button */}
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={24} color="#000" />
+          <Text style={styles.backButtonText}>Geri</Text>
+        </TouchableOpacity>
+
         <Text style={styles.title}>Etkinlik Detayları</Text>
 
         {/* Görseller */}
         {images.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageGallery}>
-            {images.map((img, index) => (
-              <Image key={index} source={{ uri: img.image_url }} style={styles.image} />
-            ))}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.imageGallery}
+            contentContainerStyle={{ paddingHorizontal: 8, alignItems: 'center' }}
+          >
+            {images.map((img, index) => {
+              const uri = img.image_url;
+              const intrinsic = uri ? imageSizes[uri] : undefined;
+              const height = intrinsic ? Math.round((intrinsic.h / intrinsic.w) * imageWidth) : Math.round(imageWidth * 9 / 16);
+              const clampedHeight = Math.max(120, Math.min(900, height));
+              return (
+                <Image
+                  key={index}
+                  source={{ uri }}
+                  style={[styles.image, { width: imageWidth, height: clampedHeight }]}
+                  resizeMode="cover"
+                />
+              );
+            })}
           </ScrollView>
         )}
 
@@ -86,12 +128,22 @@ export default function ReadEventScreen() {
   );
 }
 
-const screenWidth = Dimensions.get('window').width;
-
 const styles = StyleSheet.create({
   container: {
     padding: 16,
     paddingBottom: 60,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#000',
+    marginLeft: 8,
+    fontWeight: '600',
   },
   title: {
     fontSize: 22,
@@ -109,7 +161,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   image: {
-    width: screenWidth * 0.8,
     height: 200,
     borderRadius: 10,
     marginRight: 10,

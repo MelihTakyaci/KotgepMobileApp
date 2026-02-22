@@ -1,19 +1,19 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TextInput } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, SIZES } from '../theme/theme';
 
 export default function Navbar() {
   return (
     <View style={styles.navbar}>
-      {/* Sol taraf: Logo ve Yazı */}
-      <View style={styles.leftContainer}>
-        <Image
-          source={require('../assets/logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+      <View style={styles.left}>
+        <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
         <Text style={styles.title}>KOTGEP</Text>
       </View>
+
+      <TouchableOpacity style={styles.right} activeOpacity={0.7}>
+        <MaterialCommunityIcons name="dots-vertical" size={22} color={COLORS.muted} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -24,37 +24,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SIZES.padding,
-    height: 70,
-    backgroundColor: COLORS.background,
+    height: 60,
+    backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.secondary,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
-  leftContainer: {
+  left: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   logo: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     marginRight: 8,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '700',
     color: COLORS.text,
   },
-  searchInput: {
-    height: 36,
-    width: 140,
-    borderBottomColor: '#f0f0f0',
-    borderBottomWidth:1,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: COLORS.text,
+  right: {
+    padding: 6,
+    borderRadius: 6,
   },
 });

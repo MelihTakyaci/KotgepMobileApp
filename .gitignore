@@ -16,6 +16,14 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+*.keystore
+
+# Signing credentials - NEVER COMMIT!
+android/app/*.keystore
+android/app/*.jks
+android/keystore.properties
+android/gradle.properties
+!android/gradle/wrapper/gradle-wrapper.properties
 
 # Metro
 .metro-health-check*

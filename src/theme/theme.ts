@@ -1,19 +1,21 @@
 // src/theme/theme.ts
 
 export const COLORS = {
-    primary: '#3E64FF',
-    secondary: '#B22222',
-    background: '#FFFFFF',
-    text: '#333333',
-  };
-  
-  export const FONTS = {
-    regular: 'System',
-    bold: 'System',
-  };
-  
-  export const SIZES = {
-    padding: 16,
-    margin: 16,
-    radius: 8,
-  };
+  primary: '#D40000',
+  secondary: '#E5E7EB',
+  background: '#F9FAFB',
+  surface: '#FFFFFF',
+  text: '#111827',
+  muted: '#6B7280',
+};
+
+export const FONTS = {
+  regular: 'System',
+  bold: 'System',
+};
+
+export const SIZES = {
+  padding: 16,
+  margin: 16,
+  radius: 16,
+};

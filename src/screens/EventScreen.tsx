@@ -1,177 +1,206 @@
-import React, { useEffect, useState } from 'react';
-import { FlatList, Image, StyleSheet, View, TouchableOpacity, Text, Modal, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  ImageBackground,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  RefreshControl,
+  useWindowDimensions,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { supabase } from '../services/supabase';
 import Layout from '../components/Layout';
 import WeatherHeader from '../components/WeatherHeader';
+import { supabase } from '../services/supabase';
+import { COLORS, SIZES } from '../theme/theme';
+
+type EventItem = {
+  id: number;
+  title: string;
+  cover_image: string;
+};
 
 export default function EventScreen() {
-  const navigation = useNavigation();
-  const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
+  const navigation = useNavigation<any>();
+  const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const { width } = useWindowDimensions();
+  // Minimum 2 columns for phones; 3+ for tablets/large screens
+  // Breakpoints: >=1200 -> 4, >=900 -> 3, otherwise 2
+  const responsiveNumColumns = width >= 1200 ? 4 : width >= 900 ? 3 : 2;
+  const itemGap = 16;
+  const itemWidth = Math.floor((width - SIZES.padding * 2 - itemGap * (responsiveNumColumns - 1)) / responsiveNumColumns);
+  const itemHeight = Math.max(160, Math.round(itemWidth * 0.7));
 
-  useEffect(() => {
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+    }
+
     const { data, error } = await supabase
       .from('events')
       .select('*')
       .order('id', { ascending: false });
 
-    console.log("Fetched events:", data);
-    console.log("Fetch error:", error);
-
     if (error) {
       console.error('Error fetching events:', error.message);
-    } else {
-      setEvents(data);
+    } else if (data) {
+      setEvents(data as EventItem[]);
     }
 
     setLoading(false);
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchEvents({ silent: true });
   };
 
-  fetchEvents();
-}, []);
-
-  const handleEventTap = (event) => {
-    setSelectedEvent(event);
-    setModalVisible(true);
+  const handleEventPress = (eventId: number) => {
+    navigation.navigate('HaberOku', { eventId });
   };
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity style={styles.card} onPress={() => handleEventTap(item)}>
-      <Image
+  const renderItem = ({ item }: { item: EventItem }) => (
+    <TouchableOpacity
+      style={[styles.card, { width: itemWidth, height: itemHeight }]}
+      activeOpacity={0.9}
+      onPress={() => handleEventPress(item.id)}
+    >
+      <ImageBackground
         source={{ uri: item.cover_image }}
-        style={styles.image}
+        style={[styles.cardImage, { height: itemHeight }]}
+        imageStyle={styles.cardImageRadius}
         defaultSource={require('../assets/placeholder.png')}
-      />
-      <View style={styles.titleOverlay}>
-        <Text style={styles.title}>{item.title}</Text>
-      </View>
+      >
+        <View style={styles.cardOverlay} />
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle} numberOfLines={3}>
+            {item.title}
+          </Text>
+        </View>
+      </ImageBackground>
     </TouchableOpacity>
   );
 
-  if (loading) {
+  if (loading && !events.length) {
     return (
       <Layout>
-        <ActivityIndicator size="large" color="#2196F3" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
       </Layout>
     );
   }
 
   return (
     <Layout>
-      <WeatherHeader city="Prizren" />
       <FlatList
         data={events}
         renderItem={renderItem}
         keyExtractor={(item) => item.id.toString()}
-        numColumns={2}
-        contentContainerStyle={styles.list}
-      />
-
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            {selectedEvent && (
-              <>
-                <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    navigation.navigate('HaberOku', { eventId: selectedEvent.id });
-                  }}
-                >
-                  <Text style={styles.buttonText}>Haberi Oku</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={() => setModalVisible(false)}
-                >
-                  <Text style={styles.buttonText}>İptal</Text>
-                </TouchableOpacity>
-              </>
-            )}
+        numColumns={responsiveNumColumns}
+        columnWrapperStyle={responsiveNumColumns > 1 ? styles.columnWrapper : undefined}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <View style={styles.headerContainer}>
+            <WeatherHeader initialCity="Prizren" />
           </View>
-        </View>
-      </Modal>
+        }
+  ListFooterComponent={<View style={styles.footerSpacer} />}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Gösterilecek içerik yok</Text>
+            <Text style={styles.emptySubtitle}>
+              Yeni haberler yüklendiğinde burada görünecek.
+            </Text>
+          </View>
+        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      />
     </Layout>
   );
 }
 
 const styles = StyleSheet.create({
-  list: {
-    padding: 10,
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerContainer: {
+    marginBottom: 24,
+  },
+  listContent: {
+    paddingVertical: 24,
+    paddingBottom: 32,
+  },
+  columnWrapper: {
+    justifyContent: 'space-between',
   },
   card: {
     flex: 1,
-    margin: 8,
-    borderRadius: 5,
+    flexBasis: '48%',
+    maxWidth: '48%',
+    height: 210,
+    borderRadius: SIZES.radius,
     overflow: 'hidden',
-    backgroundColor: '#fff',
-    elevation: 2,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    position: 'relative',
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 4,
+    marginBottom: 16,
+    backgroundColor: COLORS.surface,
   },
-  image: {
-    width: '100%',
-    height: 200,
-    resizeMode: 'cover',
+  cardImage: {
+    flex: 1,
+    justifyContent: 'flex-end',
   },
-  titleOverlay: {
+  cardImageRadius: {
+    borderRadius: SIZES.radius,
+  },
+  cardOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  cardContent: {
     position: 'absolute',
     bottom: 0,
-    width: '100%',
-    padding: 10,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    left: 0,
+    right: 0,
+    padding: SIZES.padding,
   },
-  title: {
-    color: '#fff',
-    fontWeight: 'bold',
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 22,
   },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  emptyState: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    marginTop: 80,
+    paddingHorizontal: 24,
   },
-  modalContent: {
-    width: '80%',
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 20,
-    alignItems: 'center',
-    elevation: 5,
-  },
-  modalTitle: {
+  emptyTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: COLORS.muted,
     textAlign: 'center',
   },
-  modalButton: {
-    width: '100%',
-    padding: 15,
-    borderRadius: 5,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
-    marginVertical: 5,
-  },
-  cancelButton: {
-    backgroundColor: '#9E9E9E',
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
+  footerSpacer: {
+    height: 24,
   },
 });

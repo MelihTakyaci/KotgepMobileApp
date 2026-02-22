@@ -1,30 +1,36 @@
 {
   "expo": {
-    "name": "GencKalemlerMobilApp",
+    "name": "Kotgep",
     "slug": "GencKalemlerMobilApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./src/assets/kotgep-logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/icon.png",
+      "image": "./src/assets/kotgep-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.GencKalemlerMobilApp"
+      "bundleIdentifier": "com.kotgep.app"
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./src/assets/kotgep-logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.anonymous.GencKalemlerMobilApp"
+      "package": "com.kotgep.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
-      "favicon": "./assets/icon.png"
+      "favicon": "./src/assets/kotgep-logo.png"
     },
     "plugins": [
       "expo-build-properties"
